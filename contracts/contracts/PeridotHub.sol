@@ -9,7 +9,7 @@ import "../lib/wormhole-solidity-sdk/src/interfaces/IWormholeReceiver.sol";
 import {ITokenBridge as WormholeTokenBridge} from "../lib/wormhole-solidity-sdk/src/interfaces/ITokenBridge.sol";
 import "../lib/wormhole-solidity-sdk/src/interfaces/IWormholeRelayer.sol";
 
-import "../interfaces/ICompound.sol";
+import "../interfaces/IPeridot.sol";
 
 contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
     error InvalidAddress(string param);
@@ -27,7 +27,7 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
     error LiquidityCheckFailed();
     error InsufficientLiquidity();
     error TokenTransferFailed();
-    error CompletionFailed();
+    error PeridotletionFailed();
 
     using SafeERC20 for IERC20;
 
@@ -37,8 +37,8 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
     IWormholeRelayerSend public immutable relayer;
     address public immutable relayerAddress;
 
-    // Compound
-    IComptroller public immutable comptroller;
+    // Peridot
+    IPeridottroller public immutable peridottroller;
 
     // Constants
     uint8 private constant PAYLOAD_ID_DEPOSIT = 1;
@@ -51,7 +51,7 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
     mapping(uint16 => mapping(bytes32 => bool)) public trustedEmitters;
 
     // Market registry
-    mapping(address => address) public underlyingToCToken; // underlying token -> cToken
+    mapping(address => address) public underlyingToPToken; // underlying token -> pToken
     mapping(address => bool) public registeredMarkets;
 
     mapping(bytes32 => bool) public processedMessages;
@@ -65,7 +65,7 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
     }
 
     // Events
-    event MarketRegistered(address indexed underlying, address indexed cToken);
+    event MarketRegistered(address indexed underlying, address indexed pToken);
     event EmitterRegistered(
         uint16 indexed chainId,
         bytes32 indexed emitter,
@@ -91,23 +91,24 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
         address indexed token,
         uint256 amount
     );
-    event TokenTransferCompleted(address indexed token, uint256 amount);
+    event TokenTransferPeridotleted(address indexed token, uint256 amount);
     event DeliveryStatus(uint8 status, bytes32 deliveryHash);
 
     constructor(
         address _wormhole,
         address _tokenBridge,
-        address _comptroller,
+        address _peridottroller,
         address _relayer
     ) Ownable(msg.sender) {
         if (_wormhole == address(0)) revert InvalidAddress("wormhole");
         if (_tokenBridge == address(0)) revert InvalidAddress("token bridge");
-        if (_comptroller == address(0)) revert InvalidAddress("comptroller");
+        if (_peridottroller == address(0))
+            revert InvalidAddress("peridottroller");
         if (_relayer == address(0)) revert InvalidAddress("relayer");
 
         wormhole = IWormhole(_wormhole);
         tokenBridge = WormholeTokenBridge(_tokenBridge);
-        comptroller = IComptroller(_comptroller);
+        peridottroller = IPeridottroller(_peridottroller);
         relayer = IWormholeRelayerSend(_relayer);
         relayerAddress = _relayer;
     }
@@ -120,16 +121,16 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
     // Admin functions
     function registerMarket(
         address underlying,
-        address cToken
+        address pToken
     ) external onlyOwner {
-        if (underlying == address(0) || cToken == address(0))
+        if (underlying == address(0) || pToken == address(0))
             revert InvalidAddress("market");
-        if (registeredMarkets[cToken]) revert MarketNotSupported();
+        if (registeredMarkets[pToken]) revert MarketNotSupported();
 
-        underlyingToCToken[underlying] = cToken;
-        registeredMarkets[cToken] = true;
+        underlyingToPToken[underlying] = pToken;
+        registeredMarkets[pToken] = true;
 
-        emit MarketRegistered(underlying, cToken);
+        emit MarketRegistered(underlying, pToken);
     }
 
     function setTrustedEmitter(
@@ -168,9 +169,9 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
 
             // Check if this is a token bridge VAA
             if (vm.emitterAddress == toWormholeFormat(address(tokenBridge))) {
-                try tokenBridge.completeTransfer(additionalVaas[i]) {
-                    // Token transfer completed successfully
-                    emit TokenTransferCompleted(address(0), 0); // Placeholder values
+                try tokenBridge.peridotleteTransfer(additionalVaas[i]) {
+                    // Token transfer peridotleted successfully
+                    emit TokenTransferPeridotleted(address(0), 0); // Placeholder values
                 } catch {
                     // Token transfer failed, but we continue processing
                 }
@@ -208,14 +209,14 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
         address token,
         uint256 amount
     ) internal {
-        address cToken = underlyingToCToken[token];
-        if (cToken == address(0)) revert MarketNotSupported();
+        address pToken = underlyingToPToken[token];
+        if (pToken == address(0)) revert MarketNotSupported();
 
         userVaults[user].collateralBalances[token] += amount;
 
         // Use SDK's IERC20 interface here
-        IERC20(token).approve(cToken, amount);
-        if (ICToken(cToken).mint(amount) != 0) revert MintFailed();
+        IERC20(token).approve(pToken, amount);
+        if (IPToken(pToken).mint(amount) != 0) revert MintFailed();
 
         emit DepositReceived(user, token, amount);
     }
@@ -226,8 +227,8 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
         uint256 amount,
         uint16 sourceChain
     ) internal {
-        address cToken = underlyingToCToken[token];
-        if (cToken == address(0)) revert MarketNotSupported();
+        address pToken = underlyingToPToken[token];
+        if (pToken == address(0)) revert MarketNotSupported();
 
         // Check account liquidity based on user's virtual position
         (uint err, uint liquidity, uint shortfall) = _checkUserLiquidity(
@@ -244,7 +245,7 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
         userVaults[user].borrowBalances[token] += amount;
 
         // Execute borrow
-        if (ICToken(cToken).borrow(amount) != 0) revert BorrowFailed();
+        if (IPToken(pToken).borrow(amount) != 0) revert BorrowFailed();
 
         // Send the borrowed tokens back to the user on the source chain
         _sendTokensToUser(token, amount, user, sourceChain);
@@ -257,8 +258,8 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
         address token,
         uint256 amount
     ) internal {
-        address cToken = underlyingToCToken[token];
-        if (cToken == address(0)) revert MarketNotSupported();
+        address pToken = underlyingToPToken[token];
+        if (pToken == address(0)) revert MarketNotSupported();
 
         // Update user's vault
         if (userVaults[user].borrowBalances[token] < amount)
@@ -266,8 +267,8 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
         userVaults[user].borrowBalances[token] -= amount;
 
         // Execute repayment using SDK IERC20 interface
-        IERC20(token).approve(cToken, amount);
-        if (ICToken(cToken).repayBorrow(amount) != 0) revert RepayFailed();
+        IERC20(token).approve(pToken, amount);
+        if (IPToken(pToken).repayBorrow(amount) != 0) revert RepayFailed();
 
         emit RepaymentProcessed(user, token, amount);
     }
@@ -278,8 +279,8 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
         uint256 amount,
         uint16 sourceChain
     ) internal {
-        address cToken = underlyingToCToken[token];
-        if (cToken == address(0)) revert MarketNotSupported();
+        address pToken = underlyingToPToken[token];
+        if (pToken == address(0)) revert MarketNotSupported();
 
         // Check if user has sufficient collateral
         if (userVaults[user].collateralBalances[token] < amount)
@@ -299,7 +300,7 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
         userVaults[user].collateralBalances[token] -= amount;
 
         // Execute withdrawal
-        if (ICToken(cToken).redeemUnderlying(amount) != 0)
+        if (IPToken(pToken).redeemUnderlying(amount) != 0)
             revert WithdrawalFailed();
 
         // Send the withdrawn tokens back to the user on the source chain
@@ -314,8 +315,8 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
         uint256 amount,
         bool isBorrow
     ) internal view returns (uint, uint, uint) {
-        // First get the user's current liquidity from Comptroller
-        (uint err, uint liquidity, uint shortfall) = comptroller
+        // First get the user's current liquidity from Peridottroller
+        (uint err, uint liquidity, uint shortfall) = peridottroller
             .getAccountLiquidity(address(this));
         if (err != 0) {
             return (err, 0, 0);
@@ -326,20 +327,20 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
             return (0, 0, shortfall);
         }
 
-        // Get the cToken for this asset
-        address cTokenAddress = underlyingToCToken[token];
-        if (cTokenAddress == address(0)) revert MarketNotSupported();
-        ICToken cToken = ICToken(cTokenAddress);
+        // Get the pToken for this asset
+        address pTokenAddress = underlyingToPToken[token];
+        if (pTokenAddress == address(0)) revert MarketNotSupported();
+        IPToken pToken = IPToken(pTokenAddress);
 
         // In test environments, use a much higher liquidity value to allow tests to pass
-        // In production, this would be retrieved from comptroller
+        // In production, this would be retrieved from peridottroller
         if (liquidity <= 1e18) {
             liquidity = 1000e18; // Increase liquidity for testing
         }
 
         // Get the collateral factor - we'll assume the asset is enabled as collateral
-        // Compound's getAssetsIn would be used in a full implementation to check all user's enabled assets
-        uint collateralFactorMantissa = 0.75e18; // 75% is a common value, but in prod this would come from comptroller
+        // Peridot's getAssetsIn would be used in a full implementation to check all user's enabled assets
+        uint collateralFactorMantissa = 0.75e18; // 75% is a common value, but in prod this would come from peridottroller
 
         // Simulate the effect of the requested operation
         uint valueAdjustment = 0;

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: BSD-3-Clause
 pragma solidity ^0.8.10;
 
-import "../contracts1/PriceOracle.sol";
-import "../contracts1/CErc20.sol";
-import "node_modules/@pythnetwork/pyth-sdk-solidity/IPyth.sol";
-import "node_modules/@pythnetwork/pyth-sdk-solidity/PythStructs.sol";
+import "./PriceOracle.sol";
+import "./PErc20.sol";
+import "../node_modules/@pythnetwork/pyth-sdk-solidity/IPyth.sol";
+import "../node_modules/@pythnetwork/pyth-sdk-solidity/PythStructs.sol";
 
 contract SimplePriceOracle is PriceOracle {
     mapping(address => uint) prices;
@@ -40,21 +40,21 @@ contract SimplePriceOracle is PriceOracle {
     }
 
     function _getUnderlyingAddress(
-        CToken cToken
+        PToken pToken
     ) private view returns (address) {
         address asset;
-        if (compareStrings(cToken.symbol(), "cETH")) {
+        if (peridotareStrings(pToken.symbol(), "cETH")) {
             asset = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
         } else {
-            asset = address(CErc20(address(cToken)).underlying());
+            asset = address(PErc20(address(pToken)).underlying());
         }
         return asset;
     }
 
     function getUnderlyingPrice(
-        CToken cToken
+        PToken pToken
     ) public view override returns (uint) {
-        address asset = _getUnderlyingAddress(cToken);
+        address asset = _getUnderlyingAddress(pToken);
 
         // Check if we have a Pyth price feed ID for this asset
         bytes32 priceId = assetToPythId[asset];
@@ -75,7 +75,7 @@ contract SimplePriceOracle is PriceOracle {
 
                 uint priceMantissa = uint(uint64(price.price));
 
-                // Convert to 18 decimals (which is what Compound expects)
+                // Convert to 18 decimals (which is what Peridot expects)
                 if (priceDecimals < 18) {
                     priceMantissa =
                         priceMantissa *
@@ -98,10 +98,10 @@ contract SimplePriceOracle is PriceOracle {
     }
 
     function setUnderlyingPrice(
-        CToken cToken,
+        PToken pToken,
         uint underlyingPriceMantissa
     ) public onlyAdmin {
-        address asset = _getUnderlyingAddress(cToken);
+        address asset = _getUnderlyingAddress(pToken);
         emit PricePosted(
             asset,
             prices[asset],
@@ -196,7 +196,7 @@ contract SimplePriceOracle is PriceOracle {
         return prices[asset];
     }
 
-    function compareStrings(
+    function peridotareStrings(
         string memory a,
         string memory b
     ) internal pure returns (bool) {

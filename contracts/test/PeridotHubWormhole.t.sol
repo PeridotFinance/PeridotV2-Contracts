@@ -1,10 +1,23 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import "../lib/wormhole-solidity-sdk/src/testing/WormholeRelayerTest.sol";
-import {Base} from "../lib/wormhole-solidity-sdk/src/Base.sol";
+// Using Test from forge-std
+import {Test} from "forge-std/Test.sol";
+import {console} from "forge-std/console.sol";
+import {Vm} from "forge-std/Vm.sol";
+import {stdStorage, StdStorage} from "forge-std/Test.sol";
+
+// Interfaces and Contracts Under Test
+import {IERC20} from "../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol"; // Keep this if MockToken needs it
+import {ERC20} from "../lib/openzeppelin-contracts/contracts/token/ERC20/ERC20.sol"; // Keep this for MockToken inheritance
 import {PeridotHub} from "../contracts/PeridotHub.sol";
-import "../lib/wormhole-solidity-sdk/src/Utils.sol";
+import {Peridottroller} from "../contracts/Peridottroller.sol"; // Keep interface if used directly
+import {PToken} from "../contracts/PToken.sol"; // Keep interface if used directly
+import {PErc20} from "../contracts/PErc20.sol"; // Keep interface if used directly
+import {IWormhole} from "../lib/wormhole-solidity-sdk/src/interfaces/IWormhole.sol";
+import {ITokenBridge} from "../lib/wormhole-solidity-sdk/src/interfaces/ITokenBridge.sol";
+import {IWormholeRelayer} from "../lib/wormhole-solidity-sdk/src/interfaces/IWormholeRelayer.sol";
+import {Base} from "../lib/wormhole-solidity-sdk/src/Base.sol"; // Used by CrossChainSender
 
 // Mock token for testing
 contract MockToken is ERC20 {
@@ -12,7 +25,7 @@ contract MockToken is ERC20 {
         string memory name,
         string memory symbol,
         uint8 decimals
-    ) ERC20(name, symbol, decimals) {
+    ) ERC20(name, symbol) {
         _mint(msg.sender, 1000000 * 10 ** 18);
     }
 
@@ -29,7 +42,7 @@ contract MockCToken is ERC20 {
     uint256 public borrowResult = 0; // 0 means success
     uint256 public repayResult = 0; // 0 means success
 
-    constructor(address _underlying) ERC20("Mock CToken", "cMOCK", 18) {
+    constructor(address _underlying) ERC20("Mock CToken", "cMOCK") {
         underlying = _underlying;
     }
 
@@ -113,7 +126,11 @@ contract MockWormhole {
 
 // Mock TokenBridge contract
 contract MockTokenBridge {
-    event TransferCompleted(address token, uint256 amount, address recipient);
+    event TokenTransferPeridotleted(
+        address token,
+        uint256 amount,
+        address recipient
+    );
 
     function transferTokens(
         address token,
@@ -127,7 +144,7 @@ contract MockTokenBridge {
     }
 
     function completeTransfer(bytes memory vaa) external returns (bool) {
-        emit TransferCompleted(address(0), 0, address(0));
+        emit TokenTransferPeridotleted(address(0), 0, address(0));
         return true;
     }
 
@@ -392,6 +409,11 @@ contract PeridotHubWormholeTest is Test {
     uint16 public constant SOURCE_CHAIN_ID = 1; // Use arbitrary chain ID for source
     uint16 public constant TARGET_CHAIN_ID = 2; // Use arbitrary chain ID for target
 
+    // Copied helper function from wormhole-solidity-sdk/src/Utils.sol
+    function toWormholeFormat(address addr) internal pure returns (bytes32) {
+        return bytes32(uint256(uint160(addr)));
+    }
+
     // Setup function
     function setUp() public {
         // Give OWNER some ETH for gas
@@ -492,11 +514,6 @@ contract PeridotHubWormholeTest is Test {
         tokenTarget.mint(USER, 10000 * 10 ** 18);
     }
 
-    // Helper function to convert address to Wormhole format
-    function toWormholeFormat(address addr) internal pure returns (bytes32) {
-        return bytes32(uint256(uint160(addr)));
-    }
-
     // TESTS
 
     // Test that validates our environment setup
@@ -546,13 +563,13 @@ contract PeridotHubWormholeTest is Test {
         );
 
         // Submit the payload to the target hub
-        vm.prank(mockRelayerTarget); // Use the relayer to call the function
+        vm.prank(mockRelayerTarget);
         hubTarget.receiveWormholeMessages(
             payload,
-            new bytes[](0), // No additional VAAs
-            toWormholeFormat(address(hubSource)), // Source address
-            SOURCE_CHAIN_ID, // Source chain
-            keccak256(payload) // Delivery hash
+            new bytes[](0),
+            toWormholeFormat(address(hubSource)),
+            SOURCE_CHAIN_ID,
+            keccak256(payload)
         );
 
         // Verify the deposit was recorded correctly
@@ -580,13 +597,13 @@ contract PeridotHubWormholeTest is Test {
             depositAmount
         );
 
-        vm.prank(mockRelayerTarget); // Use the relayer to call the function
+        vm.prank(mockRelayerTarget);
         hubTarget.receiveWormholeMessages(
             depositPayload,
-            new bytes[](0), // No additional VAAs
-            toWormholeFormat(address(hubSource)), // Source address
-            SOURCE_CHAIN_ID, // Source chain
-            keccak256(depositPayload) // Delivery hash
+            new bytes[](0),
+            toWormholeFormat(address(hubSource)),
+            SOURCE_CHAIN_ID,
+            keccak256(depositPayload)
         );
 
         // Verify the deposit was successful
@@ -604,13 +621,13 @@ contract PeridotHubWormholeTest is Test {
         );
 
         // Process the borrow request
-        vm.prank(mockRelayerTarget); // Use the relayer to call the function
+        vm.prank(mockRelayerTarget);
         hubTarget.receiveWormholeMessages(
             borrowPayload,
-            new bytes[](0), // No additional VAAs
-            toWormholeFormat(address(hubSource)), // Source address
-            SOURCE_CHAIN_ID, // Source chain
-            keccak256(borrowPayload) // Delivery hash
+            new bytes[](0),
+            toWormholeFormat(address(hubSource)),
+            SOURCE_CHAIN_ID,
+            keccak256(borrowPayload)
         );
 
         // Verify the borrow was successful
@@ -669,13 +686,13 @@ contract PeridotHubWormholeTest is Test {
             depositAmount
         );
 
-        vm.prank(mockRelayerTarget); // Use the relayer to call the function
+        vm.prank(mockRelayerTarget);
         hubTarget.receiveWormholeMessages(
             depositPayload,
-            new bytes[](0), // No additional VAAs
-            toWormholeFormat(address(hubSource)), // Source address
-            SOURCE_CHAIN_ID, // Source chain
-            keccak256(depositPayload) // Delivery hash
+            new bytes[](0),
+            toWormholeFormat(address(hubSource)),
+            SOURCE_CHAIN_ID,
+            keccak256(depositPayload)
         );
 
         // Verify the deposit was successful
@@ -696,13 +713,13 @@ contract PeridotHubWormholeTest is Test {
         // Measure gas consumption specifically for the withdrawal operation
         uint256 gasStarted = gasleft();
 
-        vm.prank(mockRelayerTarget); // Use the relayer to call the function
+        vm.prank(mockRelayerTarget);
         hubTarget.receiveWormholeMessages(
             withdrawPayload,
-            new bytes[](0), // No additional VAAs
-            toWormholeFormat(address(hubSource)), // Source address
-            SOURCE_CHAIN_ID, // Source chain
-            keccak256(withdrawPayload) // Delivery hash
+            new bytes[](0),
+            toWormholeFormat(address(hubSource)),
+            SOURCE_CHAIN_ID,
+            keccak256(withdrawPayload)
         );
 
         uint256 gasUsed = gasStarted - gasleft();
@@ -766,4 +783,8 @@ contract PeridotHubWormholeTest is Test {
         // but here we're just testing that the flow works without errors
         // and the TokenTransferCompleted event is emitted
     }
+
+    // Removed duplicated/incorrect tests below
+    // function test_RegisterMarket_Success() public { ... }
+    // function test_SetTrustedEmitter_Success() public { ... }
 }

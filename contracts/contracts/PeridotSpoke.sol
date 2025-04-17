@@ -303,8 +303,8 @@ contract PeridotSpoke is Ownable, ReentrancyGuard {
 
             // Check if this is a token transfer VAA
             if (vm.emitterAddress == toWormholeFormat(address(tokenBridge))) {
-                try tokenBridge.peridotleteTransfer(additionalVaas[i]) {
-                    // Token transfer peridotleted successfully
+                try tokenBridge.completeTransfer(additionalVaas[i]) {
+                    // Token transfer completed successfully
                     // We could parse the VAA to get details but for now just emit an event
                     emit AssetReceived(msg.sender, address(0), 0);
                 } catch {

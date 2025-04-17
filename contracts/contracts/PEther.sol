@@ -4,13 +4,13 @@ pragma solidity ^0.8.10;
 import "./PToken.sol";
 
 /**
- * @title Peridot's CEther Contract
+ * @title Peridot's PEther Contract
  * @notice PToken which wraps Ether
  * @author Peridot
  */
-contract CEther is PToken {
+contract PEther is PToken {
     /**
-     * @notice Construct a new CEther money market
+     * @notice Construct a new PEther money market
      * @param peridottroller_ The address of the Peridottroller
      * @param interestRateModel_ The address of the interest rate model
      * @param initialExchangeRateMantissa_ The initial exchange rate, scaled by 1e18
@@ -126,7 +126,7 @@ contract CEther is PToken {
     }
 
     /**
-     * @notice Send Ether to CEther to mint
+     * @notice Send Ether to PEther to mint
      */
     receive() external payable {
         mintInternal(msg.value);

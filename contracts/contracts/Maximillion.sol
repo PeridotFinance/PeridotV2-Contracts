@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 pragma solidity ^0.8.10;
 
-import "./CEther.sol";
+import "./PEther.sol";
 
 /**
  * @title Peridot's Maximillion Contract
@@ -9,35 +9,35 @@ import "./CEther.sol";
  */
 contract Maximillion {
     /**
-     * @notice The default cEther market to repay in
+     * @notice The default pEther market to repay in
      */
-    CEther public cEther;
+    PEther public pEther;
 
     /**
-     * @notice Construct a Maximillion to repay max in a CEther market
+     * @notice Construct a Maximillion to repay max in a PEther market
      */
-    constructor(CEther cEther_) {
-        cEther = cEther_;
+    constructor(PEther cEther_) {
+        pEther = cEther_;
     }
 
     /**
-     * @notice msg.sender sends Ether to repay an account's borrow in the cEther market
+     * @notice msg.sender sends Ether to repay an account's borrow in the pEther market
      * @dev The provided Ether is applied towards the borrow balance, any excess is refunded
      * @param borrower The address of the borrower account to repay on behalf of
      */
     function repayBehalf(address borrower) public payable {
-        repayBehalfExplicit(borrower, cEther);
+        repayBehalfExplicit(borrower, pEther);
     }
 
     /**
-     * @notice msg.sender sends Ether to repay an account's borrow in a cEther market
+     * @notice msg.sender sends Ether to repay an account's borrow in a pEther market
      * @dev The provided Ether is applied towards the borrow balance, any excess is refunded
      * @param borrower The address of the borrower account to repay on behalf of
-     * @param cEther_ The address of the cEther contract to repay in
+     * @param cEther_ The address of the pEther contract to repay in
      */
     function repayBehalfExplicit(
         address borrower,
-        CEther cEther_
+        PEther cEther_
     ) public payable {
         uint received = msg.value;
         uint borrows = cEther_.borrowBalanceCurrent(borrower);

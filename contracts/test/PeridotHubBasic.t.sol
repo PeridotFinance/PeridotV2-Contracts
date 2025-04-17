@@ -196,7 +196,7 @@ contract PeridotHubBasicTest is Test {
         hub.registerMarket(address(token), address(cToken));
 
         // Verify the market was registered
-        assertEq(hub.underlyingToCToken(address(token)), address(cToken));
+        assertEq(hub.underlyingToPToken(address(token)), address(cToken));
         assertTrue(hub.registeredMarkets(address(cToken)));
     }
 
@@ -247,7 +247,7 @@ contract PeridotHubBasicTest is Test {
         hub.registerMarket(address(token), address(cToken2));
 
         // Verify the mapping was updated
-        assertEq(hub.underlyingToCToken(address(token)), address(cToken2));
+        assertEq(hub.underlyingToPToken(address(token)), address(cToken2));
         assertTrue(hub.registeredMarkets(address(cToken2)));
     }
 
@@ -342,7 +342,7 @@ contract PeridotHubBasicTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(
                 PeridotHub.InvalidAddress.selector,
-                "comptroller"
+                "peridottroller"
             )
         );
         new PeridotHub(WORMHOLE, TOKEN_BRIDGE, address(0), address(relayer));

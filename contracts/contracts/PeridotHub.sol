@@ -9,7 +9,11 @@ import "../lib/wormhole-solidity-sdk/src/interfaces/IWormholeReceiver.sol";
 import {ITokenBridge as WormholeTokenBridge} from "../lib/wormhole-solidity-sdk/src/interfaces/ITokenBridge.sol";
 import "../lib/wormhole-solidity-sdk/src/interfaces/IWormholeRelayer.sol";
 
-import "../interfaces/IPeridot.sol";
+import "./PeridottrollerInterface.sol";
+import "./PTokenInterfaces.sol";
+import "./PToken.sol";
+import "./PErc20.sol";
+import "./Peridottroller.sol";
 
 contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
     error InvalidAddress(string param);
@@ -38,7 +42,7 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
     address public immutable relayerAddress;
 
     // Peridot
-    IPeridottroller public immutable peridottroller;
+    Peridottroller public immutable peridottroller;
 
     // Constants
     uint8 private constant PAYLOAD_ID_DEPOSIT = 1;
@@ -108,7 +112,7 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
 
         wormhole = IWormhole(_wormhole);
         tokenBridge = WormholeTokenBridge(_tokenBridge);
-        peridottroller = IPeridottroller(_peridottroller);
+        peridottroller = Peridottroller(_peridottroller);
         relayer = IWormholeRelayerSend(_relayer);
         relayerAddress = _relayer;
     }
@@ -169,8 +173,8 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
 
             // Check if this is a token bridge VAA
             if (vm.emitterAddress == toWormholeFormat(address(tokenBridge))) {
-                try tokenBridge.peridotleteTransfer(additionalVaas[i]) {
-                    // Token transfer peridotleted successfully
+                try tokenBridge.completeTransfer(additionalVaas[i]) {
+                    // Token transfer completed successfully
                     emit TokenTransferPeridotleted(address(0), 0); // Placeholder values
                 } catch {
                     // Token transfer failed, but we continue processing
@@ -216,7 +220,7 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
 
         // Use SDK's IERC20 interface here
         IERC20(token).approve(pToken, amount);
-        if (IPToken(pToken).mint(amount) != 0) revert MintFailed();
+        if (PErc20Interface(pToken).mint(amount) != 0) revert MintFailed();
 
         emit DepositReceived(user, token, amount);
     }
@@ -245,7 +249,7 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
         userVaults[user].borrowBalances[token] += amount;
 
         // Execute borrow
-        if (IPToken(pToken).borrow(amount) != 0) revert BorrowFailed();
+        if (PErc20Interface(pToken).borrow(amount) != 0) revert BorrowFailed();
 
         // Send the borrowed tokens back to the user on the source chain
         _sendTokensToUser(token, amount, user, sourceChain);
@@ -268,7 +272,8 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
 
         // Execute repayment using SDK IERC20 interface
         IERC20(token).approve(pToken, amount);
-        if (IPToken(pToken).repayBorrow(amount) != 0) revert RepayFailed();
+        if (PErc20Interface(pToken).repayBorrow(amount) != 0)
+            revert RepayFailed();
 
         emit RepaymentProcessed(user, token, amount);
     }
@@ -300,7 +305,7 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
         userVaults[user].collateralBalances[token] -= amount;
 
         // Execute withdrawal
-        if (IPToken(pToken).redeemUnderlying(amount) != 0)
+        if (PErc20Interface(pToken).redeemUnderlying(amount) != 0)
             revert WithdrawalFailed();
 
         // Send the withdrawn tokens back to the user on the source chain
@@ -330,7 +335,7 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
         // Get the pToken for this asset
         address pTokenAddress = underlyingToPToken[token];
         if (pTokenAddress == address(0)) revert MarketNotSupported();
-        IPToken pToken = IPToken(pTokenAddress);
+        PErc20Interface pToken = PErc20Interface(pTokenAddress);
 
         // In test environments, use a much higher liquidity value to allow tests to pass
         // In production, this would be retrieved from peridottroller

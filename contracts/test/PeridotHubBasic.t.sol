@@ -252,22 +252,28 @@ contract PeridotHubBasicTest is Test {
     }
 
     function test_SetTrustedEmitter() public {
-        bytes32 emitterAddress = bytes32(uint256(0x123));
-        uint16 chainId = 1;
+        uint16 testChainId = 10;
+        bytes32 testEmitter = bytes32(uint256(uint160(address(0xABC))));
 
-        // Set trusted emitter
+        // Initial state
+        assertFalse(hub.trustedEmitters(testChainId, testEmitter));
+
+        // Set emitter as owner
         vm.prank(owner);
-        hub.setTrustedEmitter(chainId, emitterAddress, true);
+        hub.setTrustedEmitter(testChainId, testEmitter, true);
+        assertTrue(hub.trustedEmitters(testChainId, testEmitter));
 
-        // Verify the emitter was registered
-        assertTrue(hub.trustedEmitters(chainId, emitterAddress));
+        // Unset emitter as owner
+        vm.prank(owner);
+        hub.setTrustedEmitter(testChainId, testEmitter, false);
+        assertFalse(hub.trustedEmitters(testChainId, testEmitter));
     }
 
     function test_SetTrustedEmitter_NotOwner() public {
-        bytes32 emitterAddress = bytes32(uint256(0x123));
-        uint16 chainId = 1;
+        uint16 testChainId = 10;
+        bytes32 testEmitter = bytes32(uint256(uint160(address(0xABC))));
 
-        // Try to set trusted emitter as non-owner
+        // Try to set emitter as non-owner
         vm.prank(user);
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -275,30 +281,31 @@ contract PeridotHubBasicTest is Test {
                 user
             )
         );
-        hub.setTrustedEmitter(chainId, emitterAddress, true);
+        hub.setTrustedEmitter(testChainId, testEmitter, true);
     }
 
     function test_EmergencyWithdraw() public {
-        // Create a mock cToken and register market
-        MockCToken cToken = new MockCToken(address(token));
-        vm.prank(owner);
-        hub.registerMarket(address(token), address(cToken));
+        uint256 amountToWithdraw = 500e18;
 
-        // Transfer some tokens to the hub
-        vm.prank(user);
-        token.transfer(address(hub), 100e18);
+        // Mint tokens directly to the hub contract
+        token.mint(address(hub), amountToWithdraw);
+        assertEq(token.balanceOf(address(hub)), amountToWithdraw);
+        assertEq(token.balanceOf(owner), 0);
 
-        // Perform emergency withdraw
+        // Withdraw as owner
         vm.prank(owner);
         hub.emergencyWithdraw(address(token));
 
-        // Verify tokens were transferred to owner
-        assertEq(token.balanceOf(owner), 100e18);
+        // Verify tokens are transferred to owner
         assertEq(token.balanceOf(address(hub)), 0);
+        assertEq(token.balanceOf(owner), amountToWithdraw);
     }
 
     function test_EmergencyWithdraw_NotOwner() public {
-        // Try to perform emergency withdraw as non-owner
+        uint256 amountToWithdraw = 500e18;
+        token.mint(address(hub), amountToWithdraw);
+
+        // Try to withdraw as non-owner
         vm.prank(user);
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -307,6 +314,18 @@ contract PeridotHubBasicTest is Test {
             )
         );
         hub.emergencyWithdraw(address(token));
+    }
+
+    function test_EmergencyWithdraw_ZeroBalance() public {
+        assertEq(token.balanceOf(address(hub)), 0);
+        assertEq(token.balanceOf(owner), 0);
+
+        // Withdraw with zero balance (should succeed but do nothing)
+        vm.prank(owner);
+        hub.emergencyWithdraw(address(token));
+
+        assertEq(token.balanceOf(address(hub)), 0);
+        assertEq(token.balanceOf(owner), 0);
     }
 
     function test_Constructor_InvalidAddresses() public {

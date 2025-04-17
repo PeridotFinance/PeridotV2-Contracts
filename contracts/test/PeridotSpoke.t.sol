@@ -376,4 +376,99 @@ contract PeridotSpokeTest is Test {
             deliveryHash
         );
     }
+
+    // Test reverting due to insufficient value for borrow, repay, withdraw
+    function testRevert_InsufficientValue_BorrowAndWithdraw() public {
+        vm.prank(USER);
+
+        // Borrow
+        vm.expectRevert(PeridotSpoke.InsufficientValue.selector);
+        spoke.borrow{value: 0.001 ether}(address(token), TEST_AMOUNT);
+
+        // Withdraw
+        vm.expectRevert(PeridotSpoke.InsufficientValue.selector);
+        spoke.withdraw{value: 0.001 ether}(address(token), TEST_AMOUNT);
+    }
+
+    // Test reverting due to insufficient value for repay (Isolated)
+    function testRevert_InsufficientValue_Repay() public {
+        // Explicitly get the cost to verify the condition
+        (uint256 cost, ) = relayer.quoteEVMDeliveryPrice(
+            HUB_CHAIN_ID,
+            0,
+            1000000
+        ); // Use same params as contract
+        uint256 sentValue = 0.001 ether;
+        assertTrue(
+            sentValue < cost,
+            "Test precondition failed: sentValue should be less than cost"
+        );
+
+        vm.prank(USER);
+
+        // Log allowance before the call
+        uint256 allowance = token.allowance(USER, address(spoke));
+        console.log(
+            "Allowance for Spoke from USER before repay call:",
+            allowance
+        );
+
+        // Expect InsufficientValue
+        vm.expectRevert(PeridotSpoke.InsufficientValue.selector);
+        spoke.repay{value: sentValue}(address(token), TEST_AMOUNT);
+    }
+
+    // Test reverting due to zero amount
+    function testRevert_ZeroAmount() public {
+        vm.prank(USER);
+
+        // Deposit
+        vm.expectRevert(PeridotSpoke.InvalidAmount.selector);
+        spoke.deposit{value: 0.01 ether}(address(token), 0);
+
+        // Borrow
+        vm.expectRevert(PeridotSpoke.InvalidAmount.selector);
+        spoke.borrow{value: 0.01 ether}(address(token), 0);
+
+        // Repay
+        vm.expectRevert(PeridotSpoke.InvalidAmount.selector);
+        spoke.repay{value: 0.01 ether}(address(token), 0);
+
+        // Withdraw
+        vm.expectRevert(PeridotSpoke.InvalidAmount.selector);
+        spoke.withdraw{value: 0.01 ether}(address(token), 0);
+    }
+
+    // Test replay attack on receiveWormholeMessages
+    function testRevert_ReceiveWormholeMessages_Replay() public {
+        bytes memory payload = abi.encode(0, USER, address(token), TEST_AMOUNT);
+        bytes[] memory additionalVaas = new bytes[](0);
+        bytes32 sourceAddress = bytes32(uint256(uint160(HUB_ADDRESS)));
+        uint16 sourceChain = HUB_CHAIN_ID;
+        bytes32 deliveryHash = keccak256(payload);
+
+        // 1. Process successfully
+        vm.prank(address(relayer));
+        spoke.receiveWormholeMessages(
+            payload,
+            additionalVaas,
+            sourceAddress,
+            sourceChain,
+            deliveryHash
+        );
+
+        // Verify message is marked as processed
+        assertTrue(spoke.processedMessages(deliveryHash));
+
+        // 2. Attempt to process again (should be ignored, no revert)
+        vm.prank(address(relayer));
+        spoke.receiveWormholeMessages(
+            payload,
+            additionalVaas,
+            sourceAddress,
+            sourceChain,
+            deliveryHash
+        );
+        // No state change expected, just returns early
+    }
 }

@@ -784,6 +784,83 @@ contract PeridotHubWormholeTest is Test {
         // and the TokenTransferCompleted event is emitted
     }
 
+    // Test rejecting replay of the same message
+    function testRevert_ReceiveWormholeMessages_Replay() public {
+        uint256 depositAmount = 10 * 10 ** 18;
+        bytes memory payload = abi.encode(
+            uint8(1), // PAYLOAD_ID_DEPOSIT
+            USER,
+            address(tokenTarget),
+            depositAmount
+        );
+        bytes32 deliveryHash = keccak256(payload); // Use consistent hash
+
+        // 1. Process the message successfully
+        vm.prank(USER);
+        tokenSource.transfer(address(hubSource), depositAmount); // Simulate token arrival
+
+        vm.prank(mockRelayerTarget);
+        hubTarget.receiveWormholeMessages(
+            payload,
+            new bytes[](0),
+            toWormholeFormat(address(hubSource)),
+            SOURCE_CHAIN_ID,
+            deliveryHash
+        );
+
+        // Verify it was processed
+        assertEq(
+            hubTarget.getCollateralBalance(USER, address(tokenTarget)),
+            depositAmount
+        );
+        assertTrue(hubTarget.processedMessages(deliveryHash));
+
+        // 2. Attempt to process the same message again
+        vm.expectRevert(PeridotHub.MessageAlreadyProcessed.selector);
+        vm.prank(mockRelayerTarget);
+        hubTarget.receiveWormholeMessages(
+            payload,
+            new bytes[](0),
+            toWormholeFormat(address(hubSource)),
+            SOURCE_CHAIN_ID,
+            deliveryHash
+        );
+    }
+
+    // Test rejecting messages from untrusted emitters
+    function testRevert_ReceiveWormholeMessages_UntrustedEmitter() public {
+        uint256 depositAmount = 10 * 10 ** 18;
+        bytes memory payload = abi.encode(
+            uint8(1), // PAYLOAD_ID_DEPOSIT
+            USER,
+            address(tokenTarget),
+            depositAmount
+        );
+        bytes32 deliveryHash = keccak256(payload);
+
+        // Attempt to process from an untrusted chain ID (SOURCE_CHAIN_ID + 10)
+        vm.expectRevert(PeridotHub.SourceNotTrusted.selector);
+        vm.prank(mockRelayerTarget);
+        hubTarget.receiveWormholeMessages(
+            payload,
+            new bytes[](0),
+            toWormholeFormat(address(hubSource)),
+            SOURCE_CHAIN_ID + 10, // Untrusted chain ID
+            deliveryHash
+        );
+
+        // Attempt to process from an untrusted address (OWNER)
+        vm.expectRevert(PeridotHub.SourceNotTrusted.selector);
+        vm.prank(mockRelayerTarget);
+        hubTarget.receiveWormholeMessages(
+            payload,
+            new bytes[](0),
+            toWormholeFormat(OWNER), // Untrusted emitter address
+            SOURCE_CHAIN_ID,
+            deliveryHash
+        );
+    }
+
     // Removed duplicated/incorrect tests below
     // function test_RegisterMarket_Success() public { ... }
     // function test_SetTrustedEmitter_Success() public { ... }

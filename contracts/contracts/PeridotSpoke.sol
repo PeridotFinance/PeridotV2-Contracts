@@ -7,8 +7,9 @@ import "../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol"
 import "../lib/wormhole-solidity-sdk/src/interfaces/IWormhole.sol";
 import "../lib/wormhole-solidity-sdk/src/interfaces/IWormholeRelayer.sol";
 import {ITokenBridge} from "../lib/wormhole-solidity-sdk/src/interfaces/ITokenBridge.sol";
+import "../lib/wormhole-solidity-sdk/src/interfaces/IWormholeReceiver.sol";
 
-contract PeridotSpoke is Ownable, ReentrancyGuard {
+contract PeridotSpoke is Ownable, ReentrancyGuard, IWormholeReceiver {
     using SafeERC20 for IERC20;
 
     // Custom errors
@@ -17,6 +18,7 @@ contract PeridotSpoke is Ownable, ReentrancyGuard {
     error InsufficientValue();
     error OnlyRelayer();
     error MessageProcessingFailed();
+    error TokenBridgeTransferFailed();
 
     // Constants
     uint8 private constant PAYLOAD_ID_DEPOSIT = 1;
@@ -109,6 +111,14 @@ contract PeridotSpoke is Ownable, ReentrancyGuard {
     ) external payable nonReentrant {
         if (amount == 0) revert InvalidAmount();
 
+        // --- Check Relayer Fee FIRST ---
+        (uint256 cost, ) = relayer.quoteEVMDeliveryPrice(
+            hubChainId,
+            0, // No additional native tokens to send
+            GAS_LIMIT
+        );
+        if (msg.value < cost) revert InsufficientValue();
+
         // Transfer tokens from user to this contract
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
 
@@ -132,15 +142,6 @@ contract PeridotSpoke is Ownable, ReentrancyGuard {
             token,
             amount
         );
-
-        // Get delivery cost from the relayer
-        (uint256 cost, ) = relayer.quoteEVMDeliveryPrice(
-            hubChainId,
-            0, // No additional native tokens to send
-            GAS_LIMIT
-        );
-
-        if (msg.value < cost) revert InsufficientValue();
 
         // Send the message to the hub
         uint64 sequence = relayer.sendPayloadToEvm{value: cost}(
@@ -197,6 +198,16 @@ contract PeridotSpoke is Ownable, ReentrancyGuard {
     ) external payable nonReentrant {
         if (amount == 0) revert InvalidAmount();
 
+        // Get delivery cost from the relayer first
+        (uint256 cost, ) = relayer.quoteEVMDeliveryPrice(
+            hubChainId,
+            0, // No additional native tokens to send
+            GAS_LIMIT
+        );
+
+        // Check if sufficient value was sent for the relayer fee
+        if (msg.value < cost) revert InsufficientValue();
+
         // Transfer tokens from user to this contract
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
 
@@ -220,15 +231,6 @@ contract PeridotSpoke is Ownable, ReentrancyGuard {
             token,
             amount
         );
-
-        // Get delivery cost from the relayer
-        (uint256 cost, ) = relayer.quoteEVMDeliveryPrice(
-            hubChainId,
-            0, // No additional native tokens to send
-            GAS_LIMIT
-        );
-
-        if (msg.value < cost) revert InsufficientValue();
 
         // Send the message to the hub
         uint64 sequence = relayer.sendPayloadToEvm{value: cost}(
@@ -285,7 +287,7 @@ contract PeridotSpoke is Ownable, ReentrancyGuard {
         bytes32 sourceAddress,
         uint16 sourceChain,
         bytes32 deliveryHash
-    ) external payable {
+    ) external payable nonReentrant {
         if (msg.sender != address(relayer)) revert OnlyRelayer();
         if (processedMessages[deliveryHash]) return; // Skip if already processed
 
@@ -308,7 +310,8 @@ contract PeridotSpoke is Ownable, ReentrancyGuard {
                     // We could parse the VAA to get details but for now just emit an event
                     emit AssetReceived(msg.sender, address(0), 0);
                 } catch {
-                    // Token transfer failed
+                    // Token transfer failed - Revert
+                    revert TokenBridgeTransferFailed();
                 }
             }
         }

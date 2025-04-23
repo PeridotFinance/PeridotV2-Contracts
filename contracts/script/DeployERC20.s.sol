@@ -7,14 +7,14 @@ import "../contracts/MockERc20.sol";
 /**
  * @title DeployContracts
  * @dev A forge script to deploy MockERC20 token
- * Usage: forge script script/DeployERC20.s.sol:DeployERC20 --rpc-url $RPC_URL --private-key $PRIVATE_KEY --broadcast
+ * Usage: forge script script/DeployERC20.s.sol:DeployERC20 --rpc-url $RPC_URL --private-key $PRIVATE_KEY --broadcast --etherscan-api-key $ARBITRUMSCAN_KEY --verify
  */
 contract DeployERC20 is Script {
     function run() public {
         vm.startBroadcast();
 
         // Step 1: Deploy the MyToken contract (MockERC20)
-        MyToken myToken = new MyToken(msg.sender);
+        USDT myToken = new USDT(msg.sender);
         console.log("MyToken deployed at: %s", address(myToken));
 
         // Step 2: For testing, mint some tokens to the deployer

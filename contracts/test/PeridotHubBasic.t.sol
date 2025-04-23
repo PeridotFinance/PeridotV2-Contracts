@@ -123,7 +123,7 @@ contract MockTokenBridge {
         bytes32 recipient,
         uint256 arbiterFee,
         uint32 nonce
-    ) external returns (uint64) {
+    ) external payable returns (uint64) {
         // Simulate token transfer behavior
         emit TokenTransferred(
             token,
@@ -147,13 +147,102 @@ contract MockTokenBridge {
     }
 }
 
+// Mock Wormhole for testing
+contract MockWormhole {
+    uint256 public currentMessageFee = 0.001 ether; // Set a default test fee
+
+    function messageFee() external view returns (uint256) {
+        return currentMessageFee;
+    }
+
+    function setMessageFee(uint256 newFee) external {
+        currentMessageFee = newFee;
+    }
+
+    // VAA Header structure offsets
+    uint256 internal constant VAA_HEADER_LENGTH = 1 + 4 + 4 + 2 + 32 + 8 + 1; // 52 bytes
+    uint256 internal constant VAA_VERSION_OFFSET = 0;
+    uint256 internal constant VAA_TIMESTAMP_OFFSET = 1;
+    uint256 internal constant VAA_NONCE_OFFSET = 5;
+    uint256 internal constant VAA_EMITTER_CHAIN_OFFSET = 9;
+    uint256 internal constant VAA_EMITTER_ADDRESS_OFFSET = 11;
+    uint256 internal constant VAA_SEQUENCE_OFFSET = 43;
+    uint256 internal constant VAA_CONSISTENCY_LEVEL_OFFSET = 51;
+    uint256 internal constant VAA_PAYLOAD_OFFSET = 52;
+
+    function parseAndVerifyVM(
+        bytes memory vaa
+    )
+        external
+        pure
+        returns (IWormhole.VM memory vm, bool valid, string memory reason)
+    {
+        // Basic mock implementation for testing token bridge VAAs
+        uint256 vaaLength = vaa.length;
+        if (vaaLength < VAA_HEADER_LENGTH) {
+            return (vm, false, "InvalidVaaLength");
+        }
+
+        // Simulate successful parsing using assembly to read from memory
+        // WARNING: Highly simplified, assumes VAA is valid and doesn't check signatures
+        assembly {
+            let vaaPtr := add(vaa, 0x20) // Pointer to the start of the bytes data
+
+            // Read header fields
+            vm := mload(0x40) // Allocate memory for the struct (solidity does this automatically, but helps clarity)
+            mstore(
+                add(vm, 0x00),
+                shr(248, mload(add(vaaPtr, VAA_VERSION_OFFSET)))
+            ) // version (uint8)
+            mstore(
+                add(vm, 0x20),
+                shr(224, mload(add(vaaPtr, VAA_TIMESTAMP_OFFSET)))
+            ) // timestamp (uint32)
+            mstore(
+                add(vm, 0x40),
+                shr(224, mload(add(vaaPtr, VAA_NONCE_OFFSET)))
+            ) // nonce (uint32)
+            mstore(
+                add(vm, 0x60),
+                shr(240, mload(add(vaaPtr, VAA_EMITTER_CHAIN_OFFSET)))
+            ) // emitterChainId (uint16)
+            mstore(
+                add(vm, 0x80),
+                mload(add(vaaPtr, VAA_EMITTER_ADDRESS_OFFSET))
+            ) // emitterAddress (bytes32)
+            mstore(
+                add(vm, 0xA0),
+                shr(192, mload(add(vaaPtr, VAA_SEQUENCE_OFFSET)))
+            ) // sequence (uint64)
+            mstore(
+                add(vm, 0xC0),
+                shr(248, mload(add(vaaPtr, VAA_CONSISTENCY_LEVEL_OFFSET)))
+            ) // consistencyLevel (uint8)
+
+            // Handle payload (dynamic bytes)
+            let payloadPtr := add(vm, 0xE0) // Pointer to the payload field within the VM struct
+            let payloadLen := sub(vaaLength, VAA_PAYLOAD_OFFSET)
+            mstore(payloadPtr, payloadLen) // Store payload length
+            // Copy payload data
+            let dataStart := add(vaaPtr, VAA_PAYLOAD_OFFSET)
+            let dataDest := add(payloadPtr, 0x20) // Destination for payload bytes data
+            calldatacopy(dataDest, dataStart, payloadLen) // Use calldatacopy as a memory copy primitive here
+
+            // Store pointer to payload in vm struct
+            mstore(add(vm, 0xE0), payloadPtr) // This line might be redundant depending on how struct memory is laid out, keeping for clarity
+        }
+
+        return (vm, true, "");
+    }
+}
+
 contract PeridotHubBasicTest is Test {
     PeridotHub public hub;
     MockERC20 public token;
     MockComptroller public comptroller;
     MockRelayer public relayer;
     MockTokenBridge public tokenBridge;
-    address public constant WORMHOLE = address(0x123);
+    MockWormhole public mockWormhole;
     address public constant TOKEN_BRIDGE = address(0x456);
     address public owner = address(0x1);
     address public user = address(0x2);
@@ -163,6 +252,7 @@ contract PeridotHubBasicTest is Test {
         token = new MockERC20();
         comptroller = new MockComptroller();
         relayer = new MockRelayer();
+        mockWormhole = new MockWormhole();
 
         // Deploy and store code at TOKEN_BRIDGE address using vm.etch
         tokenBridge = new MockTokenBridge();
@@ -171,16 +261,16 @@ contract PeridotHubBasicTest is Test {
         // Give some ETH to the contracts
         vm.deal(owner, 10 ether);
 
-        // Deploy PeridotHub
+        // Deploy PeridotHub, passing the MockWormhole address
         vm.prank(owner);
         hub = new PeridotHub(
-            WORMHOLE,
+            address(mockWormhole),
             TOKEN_BRIDGE,
             address(comptroller),
             address(relayer)
         );
 
-        // Give the hub some ETH for relayer fees
+        // Give the hub some ETH for relayer fees and wormhole fees
         vm.deal(address(hub), 1 ether);
 
         // Mint some tokens to the user
@@ -351,7 +441,7 @@ contract PeridotHubBasicTest is Test {
             )
         );
         new PeridotHub(
-            WORMHOLE,
+            address(mockWormhole),
             address(0),
             address(comptroller),
             address(relayer)
@@ -364,7 +454,12 @@ contract PeridotHubBasicTest is Test {
                 "peridottroller"
             )
         );
-        new PeridotHub(WORMHOLE, TOKEN_BRIDGE, address(0), address(relayer));
+        new PeridotHub(
+            address(mockWormhole),
+            TOKEN_BRIDGE,
+            address(0),
+            address(relayer)
+        );
 
         // Test invalid relayer address
         vm.expectRevert(
@@ -374,7 +469,7 @@ contract PeridotHubBasicTest is Test {
             )
         );
         new PeridotHub(
-            WORMHOLE,
+            address(mockWormhole),
             TOKEN_BRIDGE,
             address(comptroller),
             address(0)

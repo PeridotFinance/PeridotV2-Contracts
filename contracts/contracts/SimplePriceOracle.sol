@@ -10,6 +10,7 @@ contract SimplePriceOracle is PriceOracle {
     mapping(address => uint) prices;
     mapping(address => bool) public admin;
     mapping(address => bytes32) public assetToPythId; // Maps asset addresses to Pyth price feed IDs
+    mapping(bytes32 => uint) public lastValidPythPriceMantissa; // Stores the last valid price mantissa from Pyth
     address private owner;
     IPyth public pyth; // Pyth Oracle contract instance
     uint public pythPriceStaleThreshold; // Maximum age of price feed in seconds
@@ -21,6 +22,7 @@ contract SimplePriceOracle is PriceOracle {
         uint newPriceMantissa
     );
     event PythFeedRegistered(address asset, bytes32 priceId);
+    event LastPythPriceUpdated(bytes32 indexed priceId, uint priceMantissa); // Event for last valid price update
 
     modifier onlyAdmin() {
         require(admin[msg.sender], "Only admin can call this function");
@@ -55,45 +57,55 @@ contract SimplePriceOracle is PriceOracle {
         PToken pToken
     ) public view override returns (uint) {
         address asset = _getUnderlyingAddress(pToken);
-
-        // Check if we have a Pyth price feed ID for this asset
         bytes32 priceId = assetToPythId[asset];
 
         if (priceId != bytes32(0)) {
-            try
-                pyth.getPriceNoOlderThan(priceId, pythPriceStaleThreshold)
-            returns (PythStructs.Price memory price) {
-                // Convert Pyth price to the expected format (scaled to 18 decimals)
-                uint priceDecimals;
-                if (price.expo < 0) {
-                    // Convert negative exponent to positive decimal places
-                    priceDecimals = uint(-int(price.expo));
+            try pyth.getPriceUnsafe(priceId) returns (
+                PythStructs.Price memory price
+            ) {
+                // Check if the price timestamp is within the allowed threshold
+                if (
+                    block.timestamp - price.publishTime <=
+                    pythPriceStaleThreshold
+                ) {
+                    // Price is fresh, convert and return
+                    uint priceDecimals;
+                    if (price.expo < 0) {
+                        priceDecimals = uint(-int(price.expo));
+                    } else {
+                        priceDecimals = 0;
+                    }
+                    uint priceMantissa = uint(uint64(price.price));
+                    if (priceDecimals < 18) {
+                        priceMantissa =
+                            priceMantissa *
+                            (10 ** (18 - priceDecimals));
+                    } else if (priceDecimals > 18) {
+                        priceMantissa =
+                            priceMantissa /
+                            (10 ** (priceDecimals - 18));
+                    }
+                    // NOTE: We cannot update lastValidPythPriceMantissa here as it's a view function
+                    return priceMantissa;
                 } else {
-                    // Handle positive exponent (rare but possible)
-                    priceDecimals = 0;
+                    // Price is stale, return last known valid price if available
+                    uint lastValidPrice = lastValidPythPriceMantissa[priceId];
+                    if (lastValidPrice != 0) {
+                        return lastValidPrice;
+                    }
+                    // If no last valid price, fall through to manual price
                 }
-
-                uint priceMantissa = uint(uint64(price.price));
-
-                // Convert to 18 decimals (which is what Peridot expects)
-                if (priceDecimals < 18) {
-                    priceMantissa =
-                        priceMantissa *
-                        (10 ** (18 - priceDecimals));
-                } else if (priceDecimals > 18) {
-                    priceMantissa =
-                        priceMantissa /
-                        (10 ** (priceDecimals - 18));
-                }
-
-                return priceMantissa;
             } catch {
-                // If there's an error with Pyth (e.g., price is too old),
-                // fall back to the stored price
-                return prices[asset];
+                // If getPriceUnsafe fails, try returning last known valid price
+                uint lastValidPrice = lastValidPythPriceMantissa[priceId];
+                if (lastValidPrice != 0) {
+                    return lastValidPrice;
+                }
+                // If that fails too, fall through to manual price
             }
         }
 
+        // Fallback to manually set price
         return prices[asset];
     }
 
@@ -159,40 +171,51 @@ contract SimplePriceOracle is PriceOracle {
         bytes32 priceId = assetToPythId[asset];
 
         if (priceId != bytes32(0)) {
-            try
-                pyth.getPriceNoOlderThan(priceId, pythPriceStaleThreshold)
-            returns (PythStructs.Price memory price) {
-                // Convert Pyth price to the expected format (scaled to 18 decimals)
-                // Fix the int32 to uint conversion issue
-                uint priceDecimals;
-                if (price.expo < 0) {
-                    // Convert negative exponent to positive decimal places
-                    priceDecimals = uint(-int(price.expo));
+            try pyth.getPriceUnsafe(priceId) returns (
+                PythStructs.Price memory price
+            ) {
+                // Check if the price timestamp is within the allowed threshold
+                if (
+                    block.timestamp - price.publishTime <=
+                    pythPriceStaleThreshold
+                ) {
+                    // Price is fresh, convert and return
+                    uint priceDecimals;
+                    if (price.expo < 0) {
+                        priceDecimals = uint(-int(price.expo));
+                    } else {
+                        priceDecimals = 0;
+                    }
+                    uint priceMantissa = uint(uint64(price.price));
+                    if (priceDecimals < 18) {
+                        priceMantissa =
+                            priceMantissa *
+                            (10 ** (18 - priceDecimals));
+                    } else if (priceDecimals > 18) {
+                        priceMantissa =
+                            priceMantissa /
+                            (10 ** (priceDecimals - 18));
+                    }
+                    // NOTE: Cannot update cache here
+                    return priceMantissa;
                 } else {
-                    // Handle positive exponent (rare but possible)
-                    priceDecimals = 0;
+                    // Price is stale, return last known valid price if available
+                    uint lastValidPrice = lastValidPythPriceMantissa[priceId];
+                    if (lastValidPrice != 0) {
+                        return lastValidPrice;
+                    }
+                    // If no last valid price, fall through to manual price
                 }
-
-                uint priceMantissa = uint(uint64(price.price));
-
-                // Convert to 18 decimals
-                if (priceDecimals < 18) {
-                    priceMantissa =
-                        priceMantissa *
-                        (10 ** (18 - priceDecimals));
-                } else if (priceDecimals > 18) {
-                    priceMantissa =
-                        priceMantissa /
-                        (10 ** (priceDecimals - 18));
-                }
-
-                return priceMantissa;
             } catch {
-                // If there's an error with Pyth, fall back to the stored price
-                return prices[asset];
+                // If getPriceUnsafe fails, try returning last known valid price
+                uint lastValidPrice = lastValidPythPriceMantissa[priceId];
+                if (lastValidPrice != 0) {
+                    return lastValidPrice;
+                }
+                // If that fails too, fall through to manual price
             }
         }
-
+        // Fallback to manually set price
         return prices[asset];
     }
 

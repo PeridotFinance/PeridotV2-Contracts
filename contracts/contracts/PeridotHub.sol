@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
+// UPGRADEABLE IMPORTS - Make sure you have openzeppelin-contracts-upgradeable installed
+import {Initializable} from "../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
+import {OwnableUpgradeable} from "../lib/openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
 import "../lib/openzeppelin-contracts/contracts/access/Ownable.sol";
 import "../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 import "../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -13,7 +16,7 @@ import "./PeridottrollerInterface.sol";
 import "./PTokenInterfaces.sol";
 import "./PToken.sol";
 import "./PErc20.sol";
-import "./Peridottroller.sol";
+import "./PeridottrollerG7.sol";
 
 interface PeridottrollerLensInterface {
     function markets(address) external view returns (bool, uint);
@@ -25,7 +28,13 @@ interface PeridottrollerLensInterface {
     ) external view returns (uint, uint, uint);
 }
 
-contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
+// Inherit from Initializable and OwnableUpgradeable
+contract PeridotHub is
+    Initializable,
+    OwnableUpgradeable,
+    ReentrancyGuard,
+    IWormholeReceiver
+{
     error InvalidAddress(string param);
     error InvalidAmount();
     error MarketNotSupported();
@@ -43,6 +52,7 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
     error TokenTransferFailed();
     error PeridotletionFailed();
     error TokenBridgeTransferFailed();
+    error InsufficientContractBalanceForFee();
 
     using SafeERC20 for IERC20;
 
@@ -53,7 +63,7 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
     address public immutable relayerAddress;
 
     // Peridot
-    Peridottroller public immutable peridottroller;
+    PeridottrollerG7 public immutable peridottroller;
 
     // Constants
     uint8 private constant PAYLOAD_ID_DEPOSIT = 1;
@@ -110,23 +120,37 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
     event DeliveryStatus(uint8 status, bytes32 deliveryHash);
     event TokenTransferCompleted(address indexed token, uint256 amount);
 
+    // Constructor sets IMMUTABLE variables ONLY
     constructor(
         address _wormhole,
         address _tokenBridge,
         address _peridottroller,
-        address _relayer
-    ) Ownable(msg.sender) {
+        address _relayer // DO NOT call Ownable/OwnableUpgradeable constructor here
+    ) {
+        // Input validation remains
         if (_wormhole == address(0)) revert InvalidAddress("wormhole");
         if (_tokenBridge == address(0)) revert InvalidAddress("token bridge");
         if (_peridottroller == address(0))
             revert InvalidAddress("peridottroller");
         if (_relayer == address(0)) revert InvalidAddress("relayer");
 
+        // Set immutable variables
         wormhole = IWormhole(_wormhole);
         tokenBridge = WormholeTokenBridge(_tokenBridge);
-        peridottroller = Peridottroller(_peridottroller);
+        peridottroller = PeridottrollerG7(_peridottroller);
         relayer = IWormholeRelayerSend(_relayer);
         relayerAddress = _relayer;
+        // No Ownable init here
+    }
+
+    // --- Initializer Function --- //
+    // This MUST be called ON THE PROXY after deployment
+    function initialize(address initialOwner) external initializer {
+        // Initialize OwnableUpgradeable
+        __Ownable_init(initialOwner);
+        // Initialize ReentrancyGuard (if needed, check OZ docs for upgradeable version)
+        // __ReentrancyGuard_init();
+        // Initialize other upgradeable base contracts if you add them
     }
 
     // Helper function to convert address to bytes32
@@ -504,11 +528,21 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
         address recipient,
         uint16 targetChain
     ) internal {
+        // --- Calculate Wormhole Fee ---
+        uint256 wormholeFee = wormhole.messageFee();
+
+        // --- Check Contract Balance ---
+        if (address(this).balance < wormholeFee) {
+            revert InsufficientContractBalanceForFee();
+        }
+
+        // --- Token Handling ---
         // Approve token bridge to transfer tokens
         IERC20(token).approve(address(tokenBridge), amount);
 
-        // Transfer tokens via Wormhole token bridge
-        uint64 sequence = tokenBridge.transferTokens(
+        // --- Wormhole Actions ---
+        // Transfer tokens via Wormhole token bridge, paying the Wormhole message fee
+        uint64 sequence = tokenBridge.transferTokens{value: wormholeFee}(
             token,
             amount,
             targetChain,
@@ -517,6 +551,7 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
             0 // nonce
         );
 
+        // --- Send Receipt via Relayer ---
         // Create receipt payload to inform the user
         bytes memory payload = abi.encode(
             0, // status code for success
@@ -526,14 +561,20 @@ contract PeridotHub is Ownable, ReentrancyGuard, IWormholeReceiver {
         );
 
         // Quote the cost of delivery
-        (uint256 cost, ) = relayer.quoteEVMDeliveryPrice(
+        (uint256 relayerCost, ) = relayer.quoteEVMDeliveryPrice(
             targetChain,
             0, // No additional value to send
             GAS_LIMIT
         );
 
+        // Check if contract has enough balance for the relayer cost as well
+        if (address(this).balance < relayerCost) {
+            // Note: Checking balance *after* paying wormholeFee implicitly
+            revert InsufficientContractBalanceForFee();
+        }
+
         // Send payload to inform user of successful transfer (and pay relayer)
-        relayer.sendPayloadToEvm{value: cost}(
+        relayer.sendPayloadToEvm{value: relayerCost}(
             targetChain,
             recipient,
             payload,

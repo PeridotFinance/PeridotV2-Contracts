@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import "../lib/openzeppelin-contracts/contracts/access/Ownable.sol";
+// UPGRADEABLE IMPORTS
+import {Initializable} from "../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
+import {OwnableUpgradeable} from "../lib/openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
 import "../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 import "../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import "../lib/wormhole-solidity-sdk/src/interfaces/IWormhole.sol";
@@ -9,7 +11,13 @@ import "../lib/wormhole-solidity-sdk/src/interfaces/IWormholeRelayer.sol";
 import {ITokenBridge} from "../lib/wormhole-solidity-sdk/src/interfaces/ITokenBridge.sol";
 import "../lib/wormhole-solidity-sdk/src/interfaces/IWormholeReceiver.sol";
 
-contract PeridotSpoke is Ownable, ReentrancyGuard, IWormholeReceiver {
+// Inherit from Initializable and OwnableUpgradeable
+contract PeridotSpoke is
+    Initializable,
+    OwnableUpgradeable,
+    ReentrancyGuard,
+    IWormholeReceiver
+{
     using SafeERC20 for IERC20;
 
     // Custom errors
@@ -70,23 +78,36 @@ contract PeridotSpoke is Ownable, ReentrancyGuard, IWormholeReceiver {
         uint256 amount
     );
 
+    // Constructor sets IMMUTABLE variables ONLY
     constructor(
         address _wormhole,
         address _relayer,
         address _tokenBridge,
         uint16 _hubChainId,
-        address _hubAddress
-    ) Ownable(msg.sender) {
+        address _hubAddress // DO NOT call Ownable/OwnableUpgradeable constructor here
+    ) {
+        // Input validation remains
         if (_wormhole == address(0)) revert InvalidAddress("wormhole");
         if (_relayer == address(0)) revert InvalidAddress("relayer");
         if (_tokenBridge == address(0)) revert InvalidAddress("token bridge");
         if (_hubAddress == address(0)) revert InvalidAddress("hub address");
 
+        // Set immutable variables
         wormhole = IWormhole(_wormhole);
         relayer = IWormholeRelayerSend(_relayer);
         tokenBridge = ITokenBridge(_tokenBridge);
         hubChainId = _hubChainId;
         hubAddress = _hubAddress;
+        // No Ownable init here
+    }
+
+    // --- Initializer Function --- //
+    // This MUST be called ON THE PROXY after deployment
+    function initialize(address initialOwner) external initializer {
+        // Initialize OwnableUpgradeable
+        __Ownable_init(initialOwner);
+        // Initialize ReentrancyGuard (if needed, check OZ docs for upgradeable version)
+        // __ReentrancyGuard_init();
     }
 
     // Helper function to convert address to bytes32
@@ -111,22 +132,30 @@ contract PeridotSpoke is Ownable, ReentrancyGuard, IWormholeReceiver {
     ) external payable nonReentrant {
         if (amount == 0) revert InvalidAmount();
 
-        // --- Check Relayer Fee FIRST ---
-        (uint256 cost, ) = relayer.quoteEVMDeliveryPrice(
+        // --- Calculate Fees ---
+        (uint256 relayerCost, ) = relayer.quoteEVMDeliveryPrice(
             hubChainId,
             0, // No additional native tokens to send
             GAS_LIMIT
         );
-        if (msg.value < cost) revert InsufficientValue();
+        uint256 wormholeFee = wormhole.messageFee();
+        uint256 totalFee = relayerCost + wormholeFee;
 
+        // --- Check Sent Value ---
+        if (msg.value < totalFee) revert InsufficientValue();
+
+        // --- Token Handling ---
         // Transfer tokens from user to this contract
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
 
-        // First transfer the token to the token bridge via wormhole
+        // Approve token bridge to spend tokens
         IERC20(token).approve(address(tokenBridge), amount);
 
-        // Call the token bridge to transfer tokens
-        uint64 transferSequence = tokenBridge.transferTokens(
+        // --- Wormhole Actions ---
+        // Call the token bridge to transfer tokens, paying the Wormhole message fee
+        uint64 transferSequence = tokenBridge.transferTokens{
+            value: wormholeFee
+        }(
             token,
             amount,
             hubChainId,
@@ -143,8 +172,9 @@ contract PeridotSpoke is Ownable, ReentrancyGuard, IWormholeReceiver {
             amount
         );
 
-        // Send the message to the hub
-        uint64 sequence = relayer.sendPayloadToEvm{value: cost}(
+        // Send the message to the hub, paying the relayer fee
+        // Use msg.value - wormholeFee to avoid overspending if user sent extra
+        uint64 sequence = relayer.sendPayloadToEvm{value: relayerCost}(
             hubChainId,
             hubAddress,
             payload,
@@ -198,24 +228,30 @@ contract PeridotSpoke is Ownable, ReentrancyGuard, IWormholeReceiver {
     ) external payable nonReentrant {
         if (amount == 0) revert InvalidAmount();
 
-        // Get delivery cost from the relayer first
-        (uint256 cost, ) = relayer.quoteEVMDeliveryPrice(
+        // --- Calculate Fees ---
+        (uint256 relayerCost, ) = relayer.quoteEVMDeliveryPrice(
             hubChainId,
             0, // No additional native tokens to send
             GAS_LIMIT
         );
+        uint256 wormholeFee = wormhole.messageFee();
+        uint256 totalFee = relayerCost + wormholeFee;
 
-        // Check if sufficient value was sent for the relayer fee
-        if (msg.value < cost) revert InsufficientValue();
+        // --- Check Sent Value ---
+        if (msg.value < totalFee) revert InsufficientValue();
 
+        // --- Token Handling ---
         // Transfer tokens from user to this contract
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
 
         // Approve token bridge to spend tokens
         IERC20(token).approve(address(tokenBridge), amount);
 
-        // Call the token bridge to transfer tokens
-        uint64 transferSequence = tokenBridge.transferTokens(
+        // --- Wormhole Actions ---
+        // Call the token bridge to transfer tokens, paying the Wormhole message fee
+        uint64 transferSequence = tokenBridge.transferTokens{
+            value: wormholeFee
+        }(
             token,
             amount,
             hubChainId,
@@ -232,8 +268,9 @@ contract PeridotSpoke is Ownable, ReentrancyGuard, IWormholeReceiver {
             amount
         );
 
-        // Send the message to the hub
-        uint64 sequence = relayer.sendPayloadToEvm{value: cost}(
+        // Send the message to the hub, paying the relayer fee
+        // Use msg.value - wormholeFee to avoid overspending if user sent extra
+        uint64 sequence = relayer.sendPayloadToEvm{value: relayerCost}(
             hubChainId,
             hubAddress,
             payload,

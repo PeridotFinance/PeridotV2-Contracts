@@ -3,7 +3,6 @@ node_modules
 artifacts
 cache
 addresses.MD
-out
 Wormhole-Docs
 WormholeLLM
 .cursor
@@ -15,3 +14,4 @@ contracts1
 broadcast
 wormhole_sdk_summary.md
 peridot_implementation_guide.md
+PROJECT_STATUS.md

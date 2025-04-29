@@ -20,9 +20,9 @@ import "../contracts/PriceOracle.sol"; // Interface for the oracle
 contract DeployComptroller is Script {
     // !!! IMPORTANT: Replace with your deployed SimplePriceOracle address !!!
     address constant ORACLE_ADDRESS =
-        0xdefE2f4D1Bf069C7167f9b093F2ee9f01D557812;
+        0xC54eEC89EA82D82b4D75B6ccffe28633e52e1550;
     address constant PERIDOT_ADDRESS =
-        0x49B73557Cd9E307bB0846e6DDDf884Bca3064a00;
+        0x28fE679719e740D15FC60325416bB43eAc50cD15;
 
     // Interest Rate Model Parameters (Example values, adjust as needed)
     // uint baseRatePerYear = 0.02e18; // 2%

@@ -20,11 +20,11 @@ contract DeployPErc20Delegator is Script {
     // --- CONFIGURATION ---
     // !!! IMPORTANT: Replace these placeholders !!!
     address constant UNDERLYING_ERC20_ADDRESS =
-        0xDEe566b3Fe99F8d9934BAAEEdDA298D5B76B8868; // Address of the underlying ERC20 (e.g., USDC)
+        0xeAEdaF63CbC1d00cB6C14B5c4DE161d68b7C63A0; // Address of the underlying ERC20 (e.g., USDC)
     address constant COMPTROLLER_ADDRESS =
-        0xfB3f8837B1Ad7249C1B253898b3aa7FaB22E68aD; // Address of the deployed Unitroller proxy
+        0xB911C192ed1d6428A12F2Cf8F636B00c34e68a2a; // Address of the deployed Unitroller proxy
     address constant INTEREST_RATE_MODEL_ADDRESS =
-        0xcf26c1EcB6482a9A626d986A8E3c87fb68f2F8f3; // Address of the deployed InterestRateModel
+        0xf79b3af6954bCbeDfE0F6BE34DD1153A391E8083; // Address of the deployed InterestRateModel
 
     // PToken Parameters (Adjust as needed)
     // Initial exchange rate = (underlying / pToken) * 10^(18 + underlyingDecimals - pTokenDecimals)
@@ -32,8 +32,8 @@ contract DeployPErc20Delegator is Script {
     // Example USDC (6 dec), pUSDC (8 dec): 2 * 10^(18 + 6 - 8) = 2 * 10^16 = 2e16
     // A common starting point: initial exchange rate of 0.02 corresponds to 2e16 mantissa (assuming 18 decimals for mantissa)
     uint256 constant INITIAL_EXCHANGE_RATE_MANTISSA = 2e16; // Example: Initial exchange rate of 0.02, scaled by 1e18. Adjust based on decimals! Needs careful calculation.
-    string constant PTOKEN_NAME = "Peridot USDC"; // e.g., "Peridot USDC"
-    string constant PTOKEN_SYMBOL = "pUSDC"; // e.g., "pUSDC"
+    string constant PTOKEN_NAME = "Peridot pToken"; // e.g., "Peridot USDC"
+    string constant PTOKEN_SYMBOL = "pP"; // e.g., "pUSDC"
     uint8 constant PTOKEN_DECIMALS = 8; // Standard PToken decimals
 
     address admin = msg.sender; // Admin/Owner address

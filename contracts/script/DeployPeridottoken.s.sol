@@ -21,6 +21,6 @@ contract DeployPeridot is Script {
 
         // Output deployment summary
         console.log("\n==== Deployment Summary ====");
-        console.log("Peridottoken (MTK): %s", address(peridot));
+        console.log("Peridottoken : %s", address(peridot));
     }
 }

@@ -13,7 +13,7 @@ import "../contracts/SimplePriceOracle.sol";
 contract DeployContracts is Script {
     // Network-specific Pyth contract addresses
     address constant PYTH_MAINNET = 0x4374e5a8b9C22271E9EB878A2AA31DE97DF15DAF; // Arbitrum Sepolia
-    address constant PYTH_GOERLI = 0xff1a0f4744e8582DF1aE09D5611b887B6a12925C; // Goerli Testnet
+    address constant PYTH_GOERLI = 0x2880aB155794e7179c9eE2e38200202908C17B43; // Soneium Testnet
     address constant PYTH_SEPOLIA = 0x2880aB155794e7179c9eE2e38200202908C17B43; // Sepolia Testnet
     address constant PYTH_OPTIMISM = 0xff1a0f4744e8582DF1aE09D5611b887B6a12925C; // Optimism Mainnet
     address constant PYTH_OP_SEPOLIA =
@@ -37,7 +37,7 @@ contract DeployContracts is Script {
 
         if (chainId == 421614) {
             pythAddress = PYTH_MAINNET; // ARbitrum Sepolia
-        } else if (chainId == 5) {
+        } else if (chainId == 1946) {
             pythAddress = PYTH_GOERLI; // Goerli Testnet
         } else if (chainId == 11155111) {
             pythAddress = PYTH_SEPOLIA; // Sepolia Testnet

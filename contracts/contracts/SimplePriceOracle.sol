@@ -45,7 +45,7 @@ contract SimplePriceOracle is PriceOracle {
         PToken pToken
     ) private view returns (address) {
         address asset;
-        if (peridotareStrings(pToken.symbol(), "cETH")) {
+        if (peridotareStrings(pToken.symbol(), "pETH")) {
             asset = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
         } else {
             asset = address(PErc20(address(pToken)).underlying());

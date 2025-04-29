@@ -6,7 +6,7 @@ contract Peridot {
     string public constant name = "Peridot";
 
     /// @notice EIP-20 token symbol for this token
-    string public constant symbol = "PERIDOT";
+    string public constant symbol = "P";
 
     /// @notice EIP-20 token decimals for this token
     uint8 public constant decimals = 18;
